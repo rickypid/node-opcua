@@ -19,6 +19,7 @@ import * as debug from "node-opcua-debug";
 import { AcknowledgeMessage } from "./AcknowledgeMessage";
 import { HelloMessage } from "./HelloMessage";
 import { TCPErrorMessage } from "./TCPErrorMessage";
+import { doTraceHelloAck } from "./utils";
 
 const doDebug = debug.checkDebugFlag(__filename);
 const debugLog = debug.make_debugLog(__filename);
@@ -54,6 +55,17 @@ function createClientSocket(endpointUrl: string): Socket {
             throw new Error(msg);
         }
     }
+}
+export interface ClientTCP_transport {
+    on(eventName: "message", eventHandler: (message: Buffer) => void): this;
+    once(eventName: "message", eventHandler: (message: Buffer) => void): this;
+    on(eventName: "socket_closed", eventHandler: (err: Error | null) => void): this;
+    once(eventName: "socket_closed", eventHandler: (err: Error | null) => void): this;
+    on(eventName: "close", eventHandler: (err: Error | null) => void): this;
+    once(eventName: "close", eventHandler: (err: Error | null) => void): this;
+//
+    on(eventName: "connection_break", eventHandler: () => void): this;
+    once(eventName: "connection_break", eventHandler: () => void): this;
 }
 
 /**
@@ -260,12 +272,22 @@ export class ClientTCP_transport extends TCP_transport {
 
             err = new Error("ACK: ERR received " + response.statusCode.toString() + " : " + response.reason);
             (err as any).statusCode = response.statusCode;
+            // istanbul ignore next
+            if (doTraceHelloAck) {
+                console.log("receiving ERR instead of Ack", response.toString());
+            }
             callback(err);
         } else {
             responseClass = AcknowledgeMessage;
             _stream.rewind();
             response = decodeMessage(_stream, responseClass);
             this.parameters = response as AcknowledgeMessage;
+
+            // istanbul ignore next
+            if (doTraceHelloAck) {
+                console.log("receiving Ack\n", response.toString());
+            }
+    
             callback();
         }
     }
@@ -275,14 +297,13 @@ export class ClientTCP_transport extends TCP_transport {
         if (doDebug) {
             debugLog("entering _send_HELLO_request");
         }
-
         assert(this._socket);
         assert(isFinite(this.protocolVersion));
         assert(this.endpointUrl.length > 0, " expecting a valid endpoint url");
 
         // Write a message to the socket as soon as the client is connected,
         // the server will receive it as message from the client
-        const request = new HelloMessage({
+        const helloMessage = new HelloMessage({
             endpointUrl: this.endpointUrl,
             maxChunkCount: 0, // 0 - no limits
             maxMessageSize: 0, // 0 - no limits
@@ -291,8 +312,12 @@ export class ClientTCP_transport extends TCP_transport {
             receiveBufferSize: 1024 * 64 * 10,
             sendBufferSize: 1024 * 64 * 10 // 8192 min,
         });
+        // istanbul ignore next
+        if (doTraceHelloAck) {
+            console.log(`sending Hello\n ${helloMessage.toString()}`);
+        }
 
-        const messageChunk = packTcpMessage("HEL", request);
+        const messageChunk = packTcpMessage("HEL", helloMessage);
         this._write_chunk(messageChunk);
     }
 

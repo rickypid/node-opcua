@@ -186,7 +186,7 @@ module.exports = function(test) {
                     if (subscription_raw_notification_event.callCount > 0) {
                         return;
                     }
-                    await new Promise((resolve) => setTimeout(resolve, 2000));
+                    await new Promise((resolve) => setTimeout(resolve, 3000));
                     await wait_notification();
                 }
                 await wait_notification();
@@ -203,7 +203,8 @@ module.exports = function(test) {
 
                 dumpNotificationResult();
 
-                subscription_raw_notification_event.getCall(0).args[0].notificationData[0].monitoredItems.length.should.eql(itemsToMonitor.length);
+                subscription_raw_notification_event.getCall(0).args[0].notificationData[0].monitoredItems.length.should.eql(
+                    Math.min(itemsToMonitor.length, 5000));
 
                 subscription_raw_notification_event.resetHistory();
                 subscription_raw_notification_event.callCount.should.eql(0);

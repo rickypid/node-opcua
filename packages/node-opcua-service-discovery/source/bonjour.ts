@@ -8,6 +8,7 @@ import { promisify } from "util";
 
 import { assert } from "node-opcua-assert";
 import { checkDebugFlag, make_debugLog } from "node-opcua-debug";
+import { ObjectRegistry } from "node-opcua-object-registry";
 
 const debugLog = make_debugLog(__filename);
 const doDebug = checkDebugFlag(__filename);
@@ -15,10 +16,13 @@ const doDebug = checkDebugFlag(__filename);
 let gBonjour: bonjour.Bonjour | undefined;
 let gBonjourRefCount = 0;
 
+const registry = new ObjectRegistry();
+
 export function acquireBonjour(): bonjour.Bonjour {
     if (gBonjourRefCount === 0) {
         // will start the Bonjour service
         gBonjour = bonjour();
+        registry.register(gBonjour);
     }
     gBonjourRefCount++;
     return gBonjour!;
@@ -29,6 +33,7 @@ export function releaseBonjour() {
     assert(gBonjourRefCount >= 0);
     if (gBonjourRefCount === 0) {
         // will start the Bonjour service
+        registry.unregister(gBonjour);
         gBonjour!.destroy();
         gBonjour = undefined;
     }
@@ -125,6 +130,10 @@ export class BonjourHolder {
         return true;
     }
 
+    public isStarted(): boolean {
+        return !!this._multicastDNS;
+    }
+    
     public _announcedOnMulticastSubnetWithCallback(options: Announcement, callback: (err: Error | null, result?: boolean) => void) {
         callback(new Error("Internal Error"));
     }
@@ -147,6 +156,7 @@ export class BonjourHolder {
             const stop = promisify(proxy);
             await stop.call(this);
             releaseBonjour();
+            await new Promise(resolve => setTimeout(resolve, 20));
             debugLog("stop announcement completed");
         }
     }

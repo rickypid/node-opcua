@@ -224,7 +224,9 @@ export interface ClientSecureChannelLayerOptions {
 export class ClientSecureChannelLayer extends EventEmitter {
     private static g_counter: number = 0;
     private _counter: number = ClientSecureChannelLayer.g_counter++;
-
+    private _bytesRead: number = 0;
+    private _bytesWritten: number = 0;
+    
     public static minTransactionTimeout = 10 * 1000; // 10 sec
     public static defaultTransactionTimeout = 60 * 1000; // 1 minute
 
@@ -238,11 +240,11 @@ export class ClientSecureChannelLayer extends EventEmitter {
     }
 
     get bytesRead(): number {
-        return this._transport ? this._transport.bytesRead : 0;
+        return this._bytesRead + (this._transport ? this._transport.bytesRead : 0);
     }
 
     get bytesWritten(): number {
-        return this._transport ? this._transport.bytesWritten : 0;
+        return this._bytesWritten + (this._transport ? this._transport.bytesWritten : 0);
     }
 
     get transactionsPerformed(): number {
@@ -319,7 +321,8 @@ export class ClientSecureChannelLayer extends EventEmitter {
         this.protocolVersion = 0;
 
         this.messageChunker = new MessageChunker({
-            derivedKeys: null
+            derivedKeys: null,
+            // note maxMessageSize cannot be set at this stage, transport is not kown
         });
 
         this.defaultSecureTokenLifetime = options.defaultSecureTokenLifetime || 30000;
@@ -408,6 +411,9 @@ export class ClientSecureChannelLayer extends EventEmitter {
         str += "\n serverNonce  ............. : " + (this.serverNonce ? this.serverNonce.toString("hex") : "null");
         str += "\n clientNonce  ............. : " + (this.clientNonce ? this.clientNonce.toString("hex") : "null");
         str += "\n transportTimeout ......... : " + this.transportTimeout;
+        str += "\n maxMessageSize (to send..) : " + (this._transport?.parameters?.maxMessageSize || "<not set>");
+        str += "\n maxChunkCount  (to send..) : " + (this._transport?.parameters?.maxChunkCount || "<not set>");
+        str += "\n receiveBufferSize(server)  : " + (this._transport?.parameters?.receiveBufferSize || "<not set>");
         str += "\n";
         return str;
     }
@@ -485,6 +491,7 @@ export class ClientSecureChannelLayer extends EventEmitter {
 
         const transport = new ClientTCP_transport();
         transport.timeout = this.transportTimeout;
+
         debugLog("ClientSecureChannelLayer#create creating ClientTCP_transport with  transport.timeout = ", transport.timeout);
         assert(!this._pending_transport);
         this._pending_transport = transport;
@@ -737,25 +744,31 @@ export class ClientSecureChannelLayer extends EventEmitter {
         if (response.responseHeader.requestHandle !== request.requestHeader.requestHandle) {
             const expected = request.requestHeader.requestHandle;
             const actual = response.responseHeader.requestHandle;
-            const moreInfo = "Request= " + request.schema.name + " Response = " + response.schema.name;
 
-            const message =
-                " WARNING SERVER responseHeader.requestHandle is invalid" +
-                ": expecting 0x" +
-                expected.toString(16) +
-                "(" +
-                expected +
-                ")" +
-                "  but got 0x" +
-                actual.toString(16) +
-                "(" +
-                actual +
-                ")" +
-                " ";
+            if (actual !== 0x0) {
+                // note some old OPCUA Server, like siemens with OPCUA 1.2 may send 0x00 as a 
+                // requestHandle, this is not harmful. THis happened with OpenSecureChannelRequest 
+                // so we only display the warning message if we have a real random discrepancy between the two requestHandle.
+                const moreInfo = "Request= " + request.schema.name + " Response = " + response.schema.name;
 
-            debugLog(chalk.red.bold(message), chalk.yellow(moreInfo));
-            console.log(chalk.red.bold(message), chalk.yellow(moreInfo));
-            console.log(request.toString());
+                const message =
+                    " WARNING SERVER responseHeader.requestHandle is invalid" +
+                    ": expecting 0x" +
+                    expected.toString(16) +
+                    "(" +
+                    expected +
+                    ")" +
+                    "  but got 0x" +
+                    actual.toString(16) +
+                    "(" +
+                    actual +
+                    ")" +
+                    " ";
+
+                debugLog(chalk.red.bold(message), chalk.yellow(moreInfo));
+                warningLog(chalk.red.bold(message), chalk.yellow(moreInfo));
+                warningLog(request.toString());
+            }
         }
 
         requestData.response = response;
@@ -810,7 +823,7 @@ export class ClientSecureChannelLayer extends EventEmitter {
         }
     }
 
-    private _cancel_pending_transactions(err?: Error) {
+    private _cancel_pending_transactions(err?: Error | null) {
         if (doDebug && this._requests) {
             debugLog(
                 "_cancel_pending_transactions  ",
@@ -832,7 +845,7 @@ export class ClientSecureChannelLayer extends EventEmitter {
         this._requests = {};
     }
 
-    private _on_transport_closed(err?: Error) {
+    private _on_transport_closed(err?: Error| null) {
         debugLog(" =>ClientSecureChannelLayer#_on_transport_closed  err=", err ? err.message : "null");
 
         if (this.__in_normal_close_operation) {
@@ -847,6 +860,11 @@ export class ClientSecureChannelLayer extends EventEmitter {
          * @param err
          */
         this.emit("close", err);
+
+        //
+        this._bytesRead += this._transport?.bytesRead || 0;
+        this._bytesWritten += this._transport?.bytesWritten || 0;
+
         this._transport?.dispose();
         this._transport = undefined;
         this._cancel_pending_transactions(err);
@@ -1042,15 +1060,11 @@ export class ClientSecureChannelLayer extends EventEmitter {
             this._on_receive_message_chunk(messageChunk);
         });
 
-        this._transport.on("close", (err: Error) => this._on_transport_closed(err));
+        this._transport.on("close", (err: Error|null) => this._on_transport_closed(err));
 
         this._transport.on("connection_break", () => {
             debugLog(chalk.red("Client => CONNECTION BREAK  <="));
             this._on_transport_closed(new Error("Connection Break"));
-        });
-
-        this._transport.on("error", (err: Error) => {
-            debugLog(" ERROR", err);
         });
 
         setImmediate(() => {

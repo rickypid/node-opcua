@@ -17,6 +17,7 @@ import { writeTCPMessageHeader } from "./tools";
 
 const debugLog = debug.make_debugLog(__filename);
 const doDebug = debug.checkDebugFlag(__filename);
+const errorLog = debug.make_errorLog(__filename);
 
 let fakeSocket: any = { invalid: true };
 
@@ -33,6 +34,14 @@ export function getFakeTransport() {
 
 let counter = 0;
 
+export interface TCP_transport {
+    on(eventName: "message", eventHandler: (message: Buffer) => void): this;
+    once(eventName: "message", eventHandler: (message: Buffer) => void): this;
+    on(eventName: "socket_closed", eventHandler: (err: Error | null) => void): this;
+    once(eventName: "socket_closed", eventHandler: (err: Error | null) => void): this;
+    on(eventName: "close", eventHandler: (err: Error | null) => void): this;
+    once(eventName: "close", eventHandler: (err: Error | null) => void): this;
+}
 // tslint:disable:class-name
 export class TCP_transport extends EventEmitter {
     private static registry = new ObjectRegistry();
@@ -90,7 +99,6 @@ export class TCP_transport extends EventEmitter {
 
         this._onSocketClosedHasBeenCalled = false;
         this._onSocketEndedHasBeenCalled = false;
-
         TCP_transport.registry.register(this);
     }
 
@@ -133,7 +141,6 @@ export class TCP_transport extends EventEmitter {
         const totalLength = length + this.headerSize;
         const buffer = createFastUninitializedBuffer(totalLength);
         writeTCPMessageHeader("MSG", chunkType, totalLength, buffer);
-
         this._pendingBuffer = buffer;
 
         return buffer;
@@ -154,7 +161,6 @@ export class TCP_transport extends EventEmitter {
             this._pendingBuffer === undefined || this._pendingBuffer === messageChunk,
             " write should be used with buffer created by createChunk"
         );
-
         const header = readRawMessageHeader(messageChunk);
         assert(header.length === messageChunk.length);
         assert(["F", "C", "A"].indexOf(header.messageHeader.isFinal) !== -1);
@@ -317,6 +323,7 @@ export class TCP_transport extends EventEmitter {
         return false;
     }
 
+ 
     private _on_message_received(messageChunk: Buffer) {
         const hasCallback = this._fulfill_pending_promises(null, messageChunk);
         this.chunkReadCount++;

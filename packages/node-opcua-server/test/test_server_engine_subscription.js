@@ -17,6 +17,7 @@ const { with_fake_timer } = require("./helper_with_fake_timer");
 const describe = require("node-opcua-leak-detector").describeWithLeakDetector;
 describe("ServerEngine Subscriptions service", function() {
 
+    const test = this;
     /**
      * @type {ServerEngine}
      */
@@ -228,13 +229,12 @@ describe("ServerEngine Subscriptions service", function() {
     });
 
 
-    it("ZDZ create and terminate 2 subscriptions , with 4 publish requests", async () => {
+    it("ZDZ-1 create and terminate 2 subscriptions , with 4 publish requests", async () => {
 
-        await with_fake_timer.call(this, async () => {
+        await with_fake_timer.call(test, async () => {
 
             session = engine.createSession({ sessionTimeout: 100000000 });
 
-            const test = this;
 
 
             // CTT : deleteSub5106004
@@ -292,11 +292,10 @@ describe("ServerEngine Subscriptions service", function() {
 
     });
 
-    it("ZDZ LifeTimeCount, the publish engine shall send a StatusChangeNotification to inform that a subscription has been closed because of lifetime timeout - with 2 subscriptions", async () => {
+    it("ZDZ-2 LifeTimeCount, the publish engine shall send a StatusChangeNotification to inform that a subscription has been closed because of lifetime timeout - with 2 subscriptions", async () => {
 
-        await with_fake_timer.call(this, async () => {
-            const test = this;
-
+        await with_fake_timer.call(test, async () => {
+ 
             session = engine.createSession({
                 sessionTimeout: 100000000
             });
@@ -304,9 +303,9 @@ describe("ServerEngine Subscriptions service", function() {
             // CTT : deleteSub5106004
             const subscription_parameters = {
                 requestedPublishingInterval: 1000,  // Duration
-                requestedLifetimeCount: 60,    // Counter
-                requestedMaxKeepAliveCount: 10,    // Counter
-                maxNotificationsPerPublish: 10,    // Counter
+                requestedLifetimeCount: 60,         // Counter
+                requestedMaxKeepAliveCount: 10,     // Counter
+                maxNotificationsPerPublish: 10,     // Counter
                 publishingEnabled: true,            // Boolean
                 priority: 14                        // Byte
             };
@@ -319,8 +318,10 @@ describe("ServerEngine Subscriptions service", function() {
             test.clock.tick(subscription1.publishingInterval);
             subscription1.state.should.eql(SubscriptionState.LATE);
 
+            // wait until subscription expires entirely
             test.clock.tick(subscription1.publishingInterval * subscription1.lifeTimeCount);
             subscription1.state.should.eql(SubscriptionState.CLOSED);
+            
 
             const subscription2 = session.createSubscription(subscription_parameters);
             //xx console.log("subscription2", subscription2.subscriptionId);
@@ -336,13 +337,16 @@ describe("ServerEngine Subscriptions service", function() {
             session.publishEngine._on_PublishRequest(new PublishRequest({ requestHeader: { requestHandle: 103 } }), publishSpy);
             session.publishEngine._on_PublishRequest(new PublishRequest({ requestHeader: { requestHandle: 104 } }), publishSpy);
 
+            test.clock.tick(subscription2.publishingInterval);
+
             await session.deleteSubscription(subscription2.id);
             test.clock.tick(subscription2.publishingInterval);
 
             publishSpy.callCount.should.eql(4);
-            //xx console.log(publishSpy.getCall(0).args[1].toString());
-            //xx console.log(publishSpy.getCall(1).args[1].toString());
-            //xx console.log(publishSpy.getCall(2).args[1].toString());
+            // console.log(publishSpy.getCall(0).args[1].toString());
+            // console.log(publishSpy.getCall(1).args[1].toString());
+            // console.log(publishSpy.getCall(2).args[1].toString());
+            // console.log(publishSpy.getCall(3).args[1].toString());
 
             publishSpy.getCall(0).args[1].responseHeader.serviceResult.should.eql(StatusCodes.Good);
             publishSpy.getCall(0).args[1].subscriptionId.should.eql(subscription1.id);
@@ -369,9 +373,7 @@ describe("ServerEngine Subscriptions service", function() {
         // When the subscription times out and closed
         // And  When the client send a PublishRequest notification
         // Then the client shall receive the StatusChangeNotification
-        await with_fake_timer.call(this, async () => {
-
-            const test = this;
+        await with_fake_timer.call(test, async () => {
 
             session = engine.createSession({ sessionTimeout: 100000000 });
 
@@ -432,8 +434,7 @@ describe("ServerEngine Subscriptions service", function() {
         // When the subscription times out and closed
         // And  When the client send a PublishRequest notification
         // Then the client shall receive the StatusChangeNotification
-        await with_fake_timer.call(this, async () => {
-            const test = this;
+        await with_fake_timer.call(test, async () => {
 
             session = engine.createSession({ sessionTimeout: 100000000 });
 
@@ -481,8 +482,7 @@ describe("ServerEngine Subscriptions service", function() {
         // When the orphan subscription times out
         // Then subscription shall be disposed
 
-        await with_fake_timer.call(this, async () => {
-            const test = this;
+        await with_fake_timer.call(test, async () => {
 
             session = engine.createSession({ sessionTimeout: 100000000 });
 

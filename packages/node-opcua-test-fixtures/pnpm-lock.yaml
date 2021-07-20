@@ -1,5 +1,0 @@
-dependencies:
-  node-opcua-debug: link:../node-opcua-debug
-lockfileVersion: 5.2
-specifiers:
-  node-opcua-debug: 2.36.0

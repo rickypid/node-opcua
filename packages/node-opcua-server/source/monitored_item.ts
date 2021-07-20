@@ -16,7 +16,7 @@ import {
     checkWhereClause,
     AddressSpace
 } from "node-opcua-address-space";
-import { DateTime } from "node-opcua-basic-types";
+import { DateTime, UInt32 } from "node-opcua-basic-types";
 import { NodeClass, QualifiedNameOptions } from "node-opcua-data-model";
 import { AttributeIds } from "node-opcua-data-model";
 import {
@@ -51,7 +51,9 @@ import {
 } from "node-opcua-service-subscription";
 import { StatusCode, StatusCodes } from "node-opcua-status-code";
 import {
+    DataChangeNotification,
     EventFieldList,
+    EventNotificationList,
     MonitoringFilter,
     ReadValueIdOptions,
     SimpleAttributeOperand,
@@ -61,6 +63,8 @@ import { sameVariant, Variant } from "node-opcua-variant";
 
 import { appendToTimer, removeFromTimer } from "./node_sampler";
 import { validateFilter } from "./validate_filter";
+
+export type QueueItem = MonitoredItemNotification | EventFieldList;
 
 const defaultItemToMonitor: ReadValueIdOptions = new ReadValueId({
     attributeId: AttributeIds.Value,
@@ -195,26 +199,26 @@ function apply_dataChange_filter(this: MonitoredItem, newDataValue: DataValue, o
     // istanbul ignore next
     if (doDebug) {
         try {
-        debugLog("filter pass ?", DataChangeTrigger[trigger] ,this.oldDataValue?.toString(), newDataValue.toString());
-        if (
-            trigger === DataChangeTrigger.Status ||
-            trigger === DataChangeTrigger.StatusValue ||
-            trigger === DataChangeTrigger.StatusValueTimestamp
-        ) {
-            debugLog("statusCodeHasChanged ", statusCodeHasChanged(newDataValue, oldDataValue));
+            debugLog("filter pass ?", DataChangeTrigger[trigger], this.oldDataValue?.toString(), newDataValue.toString());
+            if (
+                trigger === DataChangeTrigger.Status ||
+                trigger === DataChangeTrigger.StatusValue ||
+                trigger === DataChangeTrigger.StatusValueTimestamp
+            ) {
+                debugLog("statusCodeHasChanged ", statusCodeHasChanged(newDataValue, oldDataValue));
+            }
+            if (trigger === DataChangeTrigger.StatusValue || trigger === DataChangeTrigger.StatusValueTimestamp) {
+                debugLog(
+                    "valueHasChanged ",
+                    valueHasChanged.call(this, newDataValue, oldDataValue, this.filter!.deadbandType, this.filter!.deadbandValue)
+                );
+            }
+            if (trigger === DataChangeTrigger.StatusValueTimestamp) {
+                debugLog("timestampHasChanged ", timestampHasChanged(newDataValue.sourceTimestamp, oldDataValue.sourceTimestamp));
+            }
+        } catch (err) {
+            console.log(err);
         }
-        if (trigger === DataChangeTrigger.StatusValue || trigger === DataChangeTrigger.StatusValueTimestamp) {
-            debugLog(
-                "valueHasChanged ",
-                valueHasChanged.call(this, newDataValue, oldDataValue, this.filter!.deadbandType, this.filter!.deadbandValue)
-            );
-        }
-        if (trigger === DataChangeTrigger.StatusValueTimestamp) {
-            debugLog("timestampHasChanged ", timestampHasChanged(newDataValue.sourceTimestamp, oldDataValue.sourceTimestamp));
-        }
-    } catch(err) {
-        console.log(err);
-    }
     }
     switch (trigger) {
         case DataChangeTrigger.Status: {
@@ -226,8 +230,7 @@ function apply_dataChange_filter(this: MonitoredItem, newDataValue: DataValue, o
             //              valid in particular for device data.
             return statusCodeHasChanged(newDataValue, oldDataValue);
         }
-        case DataChangeTrigger.StatusValue:
-        {
+        case DataChangeTrigger.StatusValue: {
             //              filtering value changes.
             //              change. The Deadband filter can be used in addition for
             //              Report a notification if either the StatusCode or the value
@@ -238,8 +241,7 @@ function apply_dataChange_filter(this: MonitoredItem, newDataValue: DataValue, o
                 valueHasChanged.call(this, newDataValue, oldDataValue, this.filter.deadbandType, this.filter.deadbandValue)
             );
         }
-        default:
-        {
+        default: {
             // StatusValueTimestamp
             //              Report a notification if either StatusCode, value or the
             //              SourceTimestamp change.
@@ -331,8 +333,6 @@ export interface BaseNode2 extends EventEmitter {
     readAttribute(context: SessionContext | null, attributeId: AttributeIds): DataValue;
 }
 
-export type QueueItem = MonitoredItemNotification | EventFieldList;
-
 type TimerKey = NodeJS.Timer;
 
 export interface ISubscription {
@@ -387,7 +387,7 @@ export class MonitoredItem extends EventEmitter {
     public filter: MonitoringFilter | null;
     public discardOldest: boolean = true;
     public queueSize: number = 0;
-    public clientHandle: number;
+    public clientHandle: UInt32;
     public $subscription?: ISubscription;
     public _samplingId?: TimerKey | string;
     public samplingFunc:
@@ -415,7 +415,7 @@ export class MonitoredItem extends EventEmitter {
         options.itemToMonitor = options.itemToMonitor || defaultItemToMonitor;
 
         this._samplingId = undefined;
-        this.clientHandle = -1; // invalid yet
+        this.clientHandle = 0; // invalid 
         this.filter = null;
         this._set_parameters(options);
 
@@ -496,6 +496,7 @@ export class MonitoredItem extends EventEmitter {
         this._stop_sampling();
     }
 
+
     public dispose() {
         if (doDebug) {
             debugLog("DISPOSING MONITORED ITEM", this._node!.nodeId.toString());
@@ -542,6 +543,13 @@ export class MonitoredItem extends EventEmitter {
         );
     }
 
+    public toString(): string {
+        let str = "";
+        str += `monitored item nodeId : ${this.node?.nodeId.toString()} \n`;
+        str += `    sampling interval : ${this.samplingInterval} \n`;
+        str += `    monitoredItemId   : ${this.monitoredItemId} \n`;
+        return str;
+    }
     /**
      * @param dataValue       the whole dataValue
      * @param skipChangeTest  indicates whether recordValue should  not check that dataValue is really
@@ -641,6 +649,10 @@ export class MonitoredItem extends EventEmitter {
 
         // processTriggerItems
         this.triggerLinkedItems();
+
+        if (doDebug) {
+            debugLog("RECORD VALUE ", this.node?.nodeId.toString());
+        }
         // store last value
         this._enqueue_value(dataValue);
     }
@@ -714,7 +726,10 @@ export class MonitoredItem extends EventEmitter {
         setImmediate(() => {
             this._triggeredNotifications = this._triggeredNotifications || [];
             const notifications = this.extractMonitoredItemNotifications(true);
-            this._triggeredNotifications = ([] as QueueItem[]).concat(this._triggeredNotifications!, notifications);
+            this._triggeredNotifications = ([] as QueueItem[]).concat(
+                this._triggeredNotifications!,
+                notifications
+            );
         });
     }
 
@@ -752,6 +767,8 @@ export class MonitoredItem extends EventEmitter {
             monitoringParameters.samplingInterval = MonitoredItem.minimumSamplingInterval; // fastest possible
         }
 
+        // spec says: Illegal request values for parameters that can be revised do not generate errors. Instead the
+        // server will choose default values and indicate them in the corresponding revised parameter
         this._set_parameters(monitoringParameters);
 
         this._adjust_queue_to_match_new_queue_size();
@@ -826,7 +843,7 @@ export class MonitoredItem extends EventEmitter {
 
             this.samplingFunc.call(this, this.oldDataValue!, (err: Error | null, newDataValue?: DataValue) => {
                 if (!this._samplingId) {
-                    // item has been dispose .... the monitored item has been disposed while the async sampling func
+                    // item has been disposed. The monitored item has been disposed while the async sampling func
                     // was taking place ... just ignore this
                     return;
                 }
@@ -848,6 +865,7 @@ export class MonitoredItem extends EventEmitter {
 
     private _stop_sampling() {
         // debugLog("MonitoredItem#_stop_sampling");
+        /* istanbul ignore next */
         if (!this.node) {
             throw new Error("Internal Error");
         }
@@ -948,18 +966,25 @@ export class MonitoredItem extends EventEmitter {
         return this.$subscription.$session;
     }
 
-    private async _start_sampling(recordInitialValue?: boolean): Promise<void> {
+    private _start_sampling(recordInitialValue?: boolean): void {
         // istanbul ignore next
         if (!this.node) {
             throw new Error("Internal Error");
         }
+        setImmediate(() => this.__start_sampling(recordInitialValue));
+    }
+    private __start_sampling(recordInitialValue?: boolean): void {
+        // istanbul ignore next
+        if (!this.node) {
+            return; // we just want to ignore here ...
+        }
+
         // make sure oldDataValue is scrapped so first data recording can happen
         this.oldDataValue = new DataValue({ statusCode: StatusCodes.BadDataUnavailable }); // unset initially
 
         this._stop_sampling();
 
         const context = new SessionContext({
-            // xx  server: this.server,
             session: this._getSession()
         });
 
@@ -1003,25 +1028,20 @@ export class MonitoredItem extends EventEmitter {
 
             // initiate first read
             if (recordInitialValue) {
-                await new Promise<void>((resolve: () => void) => {
-                    (this.node as UAVariable).readValueAsync(context, (err: Error | null, dataValue?: DataValue) => {
-                        if (!err && dataValue) {
-                            this.recordValue(dataValue, true);
-                        }
-                        resolve();
-                    });
+                /* await */ new Promise<void>((resolve: () => void) => {
+                (this.node as UAVariable).readValueAsync(context, (err: Error | null, dataValue?: DataValue) => {
+                    if (!err && dataValue) {
+                        this.recordValue(dataValue, true);
+                    }
+                    resolve();
                 });
+            });
             }
         } else {
             this._set_timer();
             if (recordInitialValue) {
-                return new Promise((resolve) => {
-                    setImmediate(() => {
-                        // xx console.log("Record Initial Value ",this.node.nodeId.toString());
-                        // initiate first read (this requires this._samplingId to be set)
-                        this._on_sampling_timer();
-                        resolve();
-                    });
+                setImmediate(() => {
+                    this._on_sampling_timer();
                 });
             }
         }
@@ -1029,8 +1049,11 @@ export class MonitoredItem extends EventEmitter {
 
     private _set_parameters(monitoredParameters: MonitoringParameters) {
         _validate_parameters(monitoredParameters);
-        this.clientHandle = monitoredParameters.clientHandle;
-
+        // only change clientHandle if it is valid (0<X<MAX)
+        if (monitoredParameters.clientHandle !== 0 && monitoredParameters.clientHandle !== 4294967295) {
+           this.clientHandle = monitoredParameters.clientHandle;
+        }
+ 
         // The Server may support data that is collected based on a sampling model or generated based on an
         // exception-based model. The fastest supported sampling interval may be equal to 0, which indicates
         // that the data item is exception-based rather than being sampled at some period. An exception-based
@@ -1067,7 +1090,7 @@ export class MonitoredItem extends EventEmitter {
         // to do eventQueueOverFlowCount
     }
 
-    private _enqueue_notification(notification: MonitoredItemNotification | EventFieldList) {
+    private _enqueue_notification(notification: QueueItem) {
         if (this.queueSize === 1) {
             // https://reference.opcfoundation.org/v104/Core/docs/Part4/5.12.1/#5.12.1.5
             // If the queue size is one, the queue becomes a buffer that always contains the newest
@@ -1109,6 +1132,9 @@ export class MonitoredItem extends EventEmitter {
     }
 
     private _makeDataChangeNotification(dataValue: DataValue): MonitoredItemNotification {
+        if (this.clientHandle === -1 || this.clientHandle === 4294967295) {
+            debugLog("Invalid client handle");
+        }
         const attributeId = this.itemToMonitor.attributeId;
         // if dataFilter is specified ....
         if (this.filter && this.filter instanceof DataChangeFilter) {
@@ -1165,11 +1191,11 @@ export class MonitoredItem extends EventEmitter {
         ) {
             throw new Error(
                 "dataValue.value.value cannot be the same object twice! " +
-                    this.node!.browseName.toString() +
-                    " " +
-                    dataValue.toString() +
-                    "  " +
-                    chalk.cyan(this.oldDataValue.toString())
+                this.node!.browseName.toString() +
+                " " +
+                dataValue.toString() +
+                "  " +
+                chalk.cyan(this.oldDataValue.toString())
             );
         }
 
