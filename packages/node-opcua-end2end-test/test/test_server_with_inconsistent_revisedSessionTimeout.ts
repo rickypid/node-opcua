@@ -1,12 +1,10 @@
-// tslint:disable:no-console
-import * as chalk from "chalk";
-import * as path from "path";
 import "should";
-import * as os from "os";
+import * as chalk from "chalk";
 
 import { ClientSession, CreateSessionResponse, OPCUAClient, OPCUAServer, OPCUAServerOptions } from "node-opcua";
 
 import { checkDebugFlag, make_debugLog, make_errorLog, make_warningLog } from "node-opcua-debug";
+import { createServerCertificateManager } from "../test_helpers/createServerCertificateManager";
 const debugLog = make_debugLog("TEST");
 const warningLog = make_warningLog("TEST");
 const errorLog = make_errorLog("TEST");
@@ -17,8 +15,10 @@ const port = 3019;
 let server: OPCUAServer;
 let weirdRevisedSessionTimeout = 0;
 async function startServer() {
+    const serverCertificateManager = await createServerCertificateManager(port);
     const serverOptions: OPCUAServerOptions = {
         port,
+        serverCertificateManager,
         isAuditing: false
     };
     server = new OPCUAServer(serverOptions);
@@ -26,12 +26,14 @@ async function startServer() {
     try {
         await server.start();
     } catch (err) {
-        errorLog(" Server failed to start ... exiting => err:", err.message);
+        if (err instanceof Error) {
+            errorLog(" Server failed to start ... exiting => err:", err.message);
+        }
         return;
     }
     server.on("response", (response) => {
         if (response instanceof CreateSessionResponse) {
-            if (weirdRevisedSessionTimeout >= 0){
+            if (weirdRevisedSessionTimeout >= 0) {
                 response.revisedSessionTimeout = weirdRevisedSessionTimeout;
             }
         }

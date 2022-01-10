@@ -1,12 +1,12 @@
 // tslint:disable:no-console
-import * as chalk from "chalk";
-import * as fs from "fs";
-const { readFile, writeFile } = fs.promises;
-import { randomBytes } from "crypto";
 import * as os from "os";
+import { randomBytes } from "crypto";
 import * as path from "path";
-import * as should from "should";
+import * as fs from "fs";
 import { hostname } from "os";
+import * as chalk from "chalk";
+const { readFile, writeFile } = fs.promises;
+import * as should from "should";
 import { OPCUACertificateManager } from "node-opcua-certificate-manager";
 import { ClientSession, makeApplicationUrn, OPCUAClient, UserIdentityInfoUserName } from "node-opcua-client";
 import { makeRoles } from "node-opcua-address-space";
@@ -30,9 +30,10 @@ import { MessageSecurityMode, SecurityPolicy } from "node-opcua-secure-channel";
 import { OPCUAServer, OPCUAServerEndPoint } from "node-opcua-server";
 import { StatusCodes } from "node-opcua-status-code";
 import { UserTokenType } from "node-opcua-types";
+import { dumpCertificate } from "node-opcua-pki";
+import { randomByteString } from "node-opcua-basic-types";
 
 import {
-    _tempFolder,
     initializeHelpers,
     produceCertificate,
     produceCertificateAndPrivateKey,
@@ -43,8 +44,7 @@ import { installPushCertificateManagementOnServer } from "../..";
 import { ClientPushCertificateManagement } from "../..";
 import { certificateMatchesPrivateKey } from "../..";
 import { OPCUAServerPartial } from "../../source";
-import { dumpCertificate } from "node-opcua-pki";
-import { randomByteString } from "node-opcua-basic-types";
+import { createServerCertificateManager } from "../../../node-opcua-end2end-test/test_helpers/createServerCertificateManager";
 
 const port = 20101;
 
@@ -56,35 +56,43 @@ const errorLog = make_errorLog("ServerConfiguration");
 // tslint:disable-next-line:no-var-requires
 const describe = require("node-opcua-leak-detector").describeWithLeakDetector;
 describe("Testing server configured with push certificate management", () => {
-    const fakePKI = path.join(_tempFolder, "FakePKI");
+    
+    let _folder: string;
 
-    const certificateManager = new OPCUACertificateManager({
-        rootFolder: fakePKI
-    });
-
-    const fakeClientPKI = path.join(_tempFolder, "FakeClientPKI");
-    const clientCertificateManager = new OPCUACertificateManager({
-        automaticallyAcceptUnknownCertificate: true,
-        rootFolder: fakeClientPKI
-    });
+    
     let clientCertificateFile = "";
     let clientPrivateKeyFile = "";
 
+    let certificateManager: OPCUACertificateManager;
+    let clientCertificateManager: OPCUACertificateManager;
+
     before(async () => {
-        //
-        await initializeHelpers();
-        if (!fs.existsSync(fakePKI)) {
-            fs.mkdirSync(fakePKI)
-        }
+
+         _folder = await initializeHelpers("CC", 2);
+
+        const fakeClientPKI = path.join(_folder, "FakeClientPKI");
         if (!fs.existsSync(fakeClientPKI)) {
-            fs.mkdirSync(fakeClientPKI)
+            fs.mkdirSync(fakeClientPKI);
+        
         }
-
-        await certificateManager.initialize();
-
-        //
+        clientCertificateManager = new OPCUACertificateManager({
+            automaticallyAcceptUnknownCertificate: true,
+            rootFolder: fakeClientPKI
+        });
+        
         await clientCertificateManager.initialize();
 
+
+        const fakePKI = path.join(_folder, "FakePKI");
+        if (!fs.existsSync(fakePKI)) {
+            fs.mkdirSync(fakePKI);
+        }
+        certificateManager = new OPCUACertificateManager({
+            rootFolder: fakePKI
+        });
+        await certificateManager.initialize();
+
+        
         clientCertificateFile = path.join(clientCertificateManager.rootDir, "own/certs/certificate.pem");
         // recreate certificate every time ! ( short date)
         await clientCertificateManager.createSelfSignedCertificate({
@@ -104,15 +112,17 @@ describe("Testing server configured with push certificate management", () => {
 
         // make sure that CA Certificate and revocation list are trusted in clientCertificateManager
         {
-            const { certificate, crl } = await _getFakeAuthorityCertificate();
+            const { certificate, crl } = await _getFakeAuthorityCertificate(_folder);
             clientCertificateManager.addIssuer(certificate);
             clientCertificateManager.addRevocationList(crl);
         }
     });
+
     after(async () => {
         await certificateManager.dispose();
         await clientCertificateManager.dispose();
     });
+    
     it("SCT-1 should modify a server to support push certificate management", async () => {
         const server = new OPCUAServer({
             port,
@@ -198,7 +208,7 @@ describe("Testing server configured with push certificate management", () => {
             const info = exploreCertificateSigningRequest(response.certificateSigningRequest!);
             debugLog(JSON.stringify(info, null, " "));
 
-            const certificateFull = await produceCertificate(response.certificateSigningRequest!);
+            const certificateFull = await produceCertificate(_folder, response.certificateSigningRequest!);
 
             const certificateChain = split_der(certificateFull);
             const certificate = certificateChain[0];
@@ -229,11 +239,7 @@ describe("Testing server configured with push certificate management", () => {
         }
     }
 
-    async function withSecureClient<T>(
-        endpointUrl: string,
-        func: (session: ClientSession) => Promise<T>
-    ) {
-
+    async function withSecureClient<T>(endpointUrl: string, func: (session: ClientSession) => Promise<T>) {
         const client = OPCUAClient.create({
             clientCertificateManager,
 
@@ -263,7 +269,6 @@ describe("Testing server configured with push certificate management", () => {
             } finally {
                 await session.close();
             }
-
         } catch (err) {
             console.log("err =", err);
             throw err;
@@ -276,7 +281,7 @@ describe("Testing server configured with push certificate management", () => {
         endpointUrl: string
     ): Promise<{ certificate: Certificate; privateKey: PrivateKey }> {
         // create a new key pair
-        const { certificate, privateKey } = await produceCertificateAndPrivateKey();
+        const { certificate, privateKey } = await produceCertificateAndPrivateKey(_folder);
 
         await withSecureClient(endpointUrl, async (session: ClientSession) => {
             const pm = new ClientPushCertificateManagement(session);
@@ -300,17 +305,12 @@ describe("Testing server configured with push certificate management", () => {
             if (response2.statusCode !== StatusCodes.Good) {
                 throw new Error("Cannot updateCertificate " + response2.statusCode.toString());
             }
-
         });
         return { certificate, privateKey };
     }
 
-    async function createSigningRequestAndNewPrivateKey(
-        endpointUrl: string
-    ): Promise<{ certificate: Certificate }> {
-
+    async function createSigningRequestAndNewPrivateKey(endpointUrl: string): Promise<{ certificate: Certificate }> {
         return await withSecureClient(endpointUrl, async (session: ClientSession) => {
-
             const pm = new ClientPushCertificateManagement(session);
 
             const response = await pm.createSigningRequest(
@@ -329,7 +329,7 @@ describe("Testing server configured with push certificate management", () => {
             const info = exploreCertificateSigningRequest(response.certificateSigningRequest!);
             debugLog(JSON.stringify(info, null, " "));
 
-            const certificateFull = await produceCertificate(response.certificateSigningRequest!);
+            const certificateFull = await produceCertificate(_folder, response.certificateSigningRequest!);
 
             const certificateChain = split_der(certificateFull);
             const certificate = certificateChain[0];
@@ -352,6 +352,7 @@ describe("Testing server configured with push certificate management", () => {
             return { certificate };
         });
     }
+    
     async function constructServerWithPushCertificate(): Promise<OPCUAServer> {
         // given that the server user manager is able to identify a  system administrator
         const mockUserManager = {
@@ -436,7 +437,9 @@ describe("Testing server configured with push certificate management", () => {
 
             await session.close();
         } catch (err) {
-            errorLog("Cannot reconnect a client !!!! ", err.message, "\n", err);
+            if (err instanceof Error) {
+                errorLog("Cannot reconnect a client !!!! ", err.message, "\n", err);
+            }
         } finally {
             await client.disconnect();
         }
@@ -578,10 +581,10 @@ describe("Testing server configured with push certificate management", () => {
     });
 
     async function simulateCertificateAndPrivateKeyChange(server: OPCUAServer) {
-        const _server = (server as any) as OPCUAServerPartial;
+        const _server = server as any as OPCUAServerPartial;
 
         // create a new key pair
-        const { certificate, privateKey } = await produceCertificateAndPrivateKey();
+        const { certificate, privateKey } = await produceCertificateAndPrivateKey(_folder);
 
         _server.$$privateKeyPEM = toPem(privateKey, "RSA PRIVATE KEY");
         _server.$$certificateChain = certificate;
@@ -727,9 +730,7 @@ describe("Testing server configured with push certificate management", () => {
 
         try {
             step("when an administrative client replaces the certificate & PrivateKey");
-            const { certificate } = await createSigningRequestAndNewPrivateKey(
-                endpointUrl
-            );
+            const { certificate } = await createSigningRequestAndNewPrivateKey(endpointUrl);
 
             step("then I should verify that the server certificate has changed");
             const certificateAfter = server.getCertificate();
@@ -743,7 +744,7 @@ describe("Testing server configured with push certificate management", () => {
             privateKeyBefore.should.not.eql(privateKeyAfter);
 
             await new Promise((resolve) => setTimeout(resolve, 3000));
-            
+
             await testWithSimpleClient(endpointUrl);
 
             onGoingClient.isReconnecting.should.eql(false, "client shall not be reconnected");
@@ -757,6 +758,4 @@ describe("Testing server configured with push certificate management", () => {
             await server.shutdown();
         }
     });
-
-
 });

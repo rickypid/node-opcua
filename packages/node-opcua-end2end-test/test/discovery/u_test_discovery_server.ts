@@ -1,10 +1,9 @@
-    // tslint:disable: no-console
-
-import * as should from "should";
-import * as async from "async";
+// tslint:disable: no-console
 import * as fs from "fs";
 import * as os from "os";
-import * as path from "path";
+import * as should from "should";
+import * as async from "async";
+
 import { assert } from "node-opcua-assert";
 
 import {
@@ -18,16 +17,15 @@ import {
     StatusCodes,
     RegisterServerMethod,
     makeApplicationUrn,
-    OPCUACertificateManager,
     FindServerResults,
     OPCUADiscoveryServer
 } from "node-opcua";
 import { readCertificate, exploreCertificate } from "node-opcua-crypto";
+import { checkDebugFlag, make_debugLog } from "node-opcua-debug";
+
+import { createServerCertificateManager } from "../../test_helpers/createServerCertificateManager";
 import { createServerThatRegistersItselfToTheDiscoveryServer, ep, startDiscovery } from "./_helper";
 
-const configFolder = path.join(__dirname, "../../tmp");
-
-import { checkDebugFlag, make_debugLog } from "node-opcua-debug";
 const debugLog = make_debugLog("TEST");
 const doDebug = checkDebugFlag("TEST");
 
@@ -37,27 +35,33 @@ const port2 = 2502;
 const port3 = 2503;
 const port4 = 2504;
 const port5 = 2505;
-const port_discovery = 1235;
+const port_discovery = 2516;
 // add the tcp/ip endpoint with no security
 
-process.on("uncaughtException",  (err) => {
+process.on("uncaughtException", (err) => {
     console.log(err);
 });
 
 // tslint:disable-next-line: no-var-requires
 const describe = require("node-opcua-leak-detector").describeWithLeakDetector;
 export function t(test: any) {
-    describe("DS1 - DiscoveryServer1", function (this: any) {
+    describe("DISCO1 - DiscoveryServer1", function (this: any) {
         this.timeout(30 * 1000);
 
         let discovery_server: OPCUADiscoveryServer | undefined;
         let discoveryServerEndpointUrl: string;
         let server: OPCUAServer | undefined;
 
-        before(() => {
+        before(async () => {
+
             server = new OPCUAServer({
-                port: port0
+                port: port0,
+                serverCertificateManager: this.serverCertificateManager,
             });
+
+            await server.initialize();
+            await server.initializeCM();
+
         });
 
         after(async () => {
@@ -66,14 +70,10 @@ export function t(test: any) {
         });
 
         beforeEach(async () => {
-            const serverCertificateManager = new OPCUACertificateManager({
-                rootFolder: path.join(configFolder, "PKI-Discovery")
-            });
-            await serverCertificateManager.initialize();
 
             discovery_server = new OPCUADiscoveryServer({
                 port: port_discovery,
-                serverCertificateManager
+                serverCertificateManager: this.discoveryServerCertificateManager
             });
             await discovery_server.start();
             discoveryServerEndpointUrl = discovery_server.getEndpointUrl();
@@ -115,7 +115,7 @@ export function t(test: any) {
             await client.disconnect();
         }
 
-        it("should fail to register server if discovery url is not specified (Bad_DiscoveryUrlMissing)", async () => {
+        it("DISCO1-1 should fail to register server if discovery url is not specified (Bad_DiscoveryUrlMissing)", async () => {
             const request = new RegisterServerRequest({
                 server: {
                     // The globally unique identifier for the Server instance. The serverUri matches
@@ -144,7 +144,7 @@ export function t(test: any) {
             await send_registered_server_request(discoveryServerEndpointUrl, request, check_response);
         });
 
-        it("should fail to register server to the discover server if server type is Client (BadInvalidArgument)", async () => {
+        it("DISCO1-2 should fail to register server to the discover server if server type is Client (BadInvalidArgument)", async () => {
             const request = new RegisterServerRequest({
                 server: {
                     // The globally unique identifier for the Server instance. The serverUri matches
@@ -173,7 +173,7 @@ export function t(test: any) {
             await send_registered_server_request(discoveryServerEndpointUrl, request, check_response);
         });
 
-        it("should fail to register server to the discover server if server name array is empty (BadServerNameMissing)", async () => {
+        it("DISCO1-3 should fail to register server to the discover server if server name array is empty (BadServerNameMissing)", async () => {
             const request = new RegisterServerRequest({
                 server: {
                     // The globally unique identifier for the Server instance. The serverUri matches
@@ -202,7 +202,7 @@ export function t(test: any) {
         });
     });
 
-    describe("DS2 - DiscoveryServer2", function (this: any) {
+    describe("DISCO2 - DiscoveryServer2", function (this: any) {
         this.timeout(20000);
 
         let discoveryServer: OPCUADiscoveryServer;
@@ -217,13 +217,10 @@ export function t(test: any) {
             OPCUAServer.registry.count().should.eql(0);
         });
         beforeEach(async () => {
-            const serverCertificateManager = new OPCUACertificateManager({
-                rootFolder: path.join(configFolder, "PKI-Discovery")
-            });
-            await serverCertificateManager.initialize();
+
             discoveryServer = new OPCUADiscoveryServer({
                 port: port_discovery,
-                serverCertificateManager
+                serverCertificateManager: this.discoveryServerCertificateManager
             });
             await discoveryServer.start();
             discoveryServerEndpointUrl = discoveryServer.getEndpointUrl()!;
@@ -238,12 +235,12 @@ export function t(test: any) {
 
         async function addServerCertificateToTrustedCertificateInDiscoveryServer(server: OPCUAServer) {
             const filename = server.certificateFile;
-            fs.existsSync(filename).should.eql(true);
+            fs.existsSync(filename).should.eql(true, " the server certficate file "+ filename + " should exist");
             const certificate = readCertificate(filename);
             await discoveryServer.serverCertificateManager.trustCertificate(certificate);
         }
 
-        it("DS2-A should register server to the discover server 2", async () => {
+        it("DISCO2-1 should register server to the discover server 2", async () => {
             const applicationUri = makeApplicationUrn(os.hostname(), "NodeOPCUA-Server");
 
             // there should be no endpoint exposed by an blank discovery server
@@ -260,11 +257,13 @@ export function t(test: any) {
             debugLog(" initialServerCount = ", initialServerCount);
             debugLog("servers[0].discoveryUrls", servers[0].discoveryUrls!.join("\n"));
 
+            const serverCertificateManager = await createServerCertificateManager(port1);
             // ----------------------------------------------------------------------------
             server = new OPCUAServer({
                 port: port1,
                 registerServerMethod: RegisterServerMethod.LDS,
                 discoveryServerEndpointUrl,
+                serverCertificateManager,
                 serverInfo: {
                     applicationName: { text: "NodeOPCUA", locale: "en" },
                     applicationUri,
@@ -275,6 +274,9 @@ export function t(test: any) {
                 }
             });
 
+            await server.initialize();
+            await server.initializeCM();
+            
             await addServerCertificateToTrustedCertificateInDiscoveryServer(server);
 
             await server.start();
@@ -308,7 +310,7 @@ export function t(test: any) {
         });
     });
 
-    describe("DS3 - DiscoveryServer3 - many server", function (this: any) {
+    describe("DISCO3 - DiscoveryServer3 - many server", function (this: any) {
         this.timeout(200000);
 
         let discoveryServer: OPCUADiscoveryServer;
@@ -431,14 +433,14 @@ export function t(test: any) {
             );
         }
 
-        it("DS3-0 checking certificates", async () => {
+        it("DISCO3-1 checking certificates", async () => {
             await checkServerCertificateAgainsLDS(server1);
             await checkServerCertificateAgainsLDS(server2);
             await checkServerCertificateAgainsLDS(server3);
             await checkServerCertificateAgainsLDS(server4);
         });
 
-        it("DS3-1 a discovery server shall be able to expose many registered servers", function (done) {
+        it("DISCO3-2 a discovery server shall be able to expose many registered servers", function (done) {
             async.series(
                 [
                     function (callback: () => void) {

@@ -1,16 +1,11 @@
 import * as fs from "fs";
 import * as path from "path";
 
-import {
-    DataTypeFactory
-} from "node-opcua-factory";
+import { DataTypeFactory } from "node-opcua-factory";
 import { NodeId } from "node-opcua-nodeid";
-
-import {
-    parseBinaryXSDAsync,
-    toTypeScript,
-    TypeDictionary
-} from "../source";
+import "node-opcua-data-model";
+import "node-opcua-variant";
+import { parseBinaryXSDAsync, toTypeScript, TypeDictionary } from "../source";
 import { MockProvider } from "./mock_id_provider";
 
 function n(i: number): NodeId {
@@ -20,7 +15,6 @@ function n(i: number): NodeId {
 const idProvider = new MockProvider();
 
 describe("CTS-1 convert Extension Object definition to Typescript 1", () => {
-
     let dataTypeFactory: DataTypeFactory;
     before(async () => {
         const sample_file = path.join(__dirname, "fixtures/sample_type.xsd");
@@ -30,10 +24,9 @@ describe("CTS-1 convert Extension Object definition to Typescript 1", () => {
         await parseBinaryXSDAsync(sample, idProvider, dataTypeFactory);
     });
 
-    it("should convert a dynamic object definition to typescript", () => {
-
+    it("should convert a dynamic object definition to typescript - 1", () => {
         const str = toTypeScript(dataTypeFactory);
-        str.should.eql(
+        str.should.eql( 
             `import {
     ByteString,
     DateTime,
@@ -93,22 +86,20 @@ interface WorkOrderType {
     assetID: UAString;
     startTime: DateTime;
     statusComments: WorkOrderStatusType[];
-}`);
+}`
+        );
     });
 });
 describe("convert Extension Object definition to Typescript 2", () => {
-
     let dataTypeFactory: DataTypeFactory;
     before(async () => {
-
         const sample_file = path.join(__dirname, "fixtures/sample_type2.xsd");
         const sample = fs.readFileSync(sample_file, "ascii");
         dataTypeFactory = new DataTypeFactory([]);
         await parseBinaryXSDAsync(sample, idProvider, dataTypeFactory);
     });
 
-    it("should convert a dynamic object definition to typescript", () => {
-
+    it("should convert a dynamic object definition to typescript - 2", () => {
         const str = toTypeScript(dataTypeFactory);
 
         str.should.eql(
@@ -216,6 +207,7 @@ interface ResultTransferOptions {
 interface SystemStateDescriptionDataType {
     state: SystemStateDataType;
     stateDescription?: UAString;
-}`);
+}`
+        );
     });
 });

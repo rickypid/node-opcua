@@ -10,7 +10,6 @@ import {
     ClientMonitoredItem,
     resolveNodeId,
     AttributeIds,
-    makeApplicationUrn,
     TimestampsToReturn,
     ErrorCallback,
     ApplicationType,
@@ -26,11 +25,11 @@ const doDebug = checkDebugFlag("TEST");
 
 const port2 = 1240;
 const port1 = 1241;
-const port_discovery = 1244;
+const discovery_port = 1244;
 
-module.exports = () => {
+export function t(test: any) {
     const describe = require("node-opcua-leak-detector").describeWithLeakDetector;
-    describe("NodeRed -  testing frequent server restart within same process", function () {
+    describe("DISCO4 - NodeRed -  testing frequent server restart within same process", function () {
         /**
          * This test simulates the way node-red will frequently start and restart
          * a opcua server and a opcua client when the user is modifying and redeploying its project
@@ -40,12 +39,12 @@ module.exports = () => {
 
         let g_server: OPCUAServer;
 
-        let discoveryServer: OPCUADiscoveryServer| undefined = undefined;
+        let discoveryServer: OPCUADiscoveryServer | undefined = undefined;
         let discoveryServerEndpointUrl: string;
 
         const startDiscoveryServer = f(function start_the_discovery_server(callback: ErrorCallback) {
             // note : only one discovery server shall be run per machine
-            startDiscovery(port_discovery)
+            startDiscovery(discovery_port)
                 .then((_discoveryServer: OPCUADiscoveryServer) => {
                     discoveryServer = _discoveryServer;
                     discoveryServerEndpointUrl = discoveryServer.getEndpointUrl();
@@ -92,7 +91,7 @@ module.exports = () => {
             subscription: ClientSubscription;
             monitoredItem: ClientMonitoredItem;
         }
-        let clients: ClientData[] = [];
+        const clients: ClientData[] = [];
 
         const connectManyClient = f(function connect_many_opcua_clients(callback: ErrorCallback) {
             let clientCount = 0;
@@ -100,7 +99,7 @@ module.exports = () => {
                 if (doDebug) {
                     debugLog(" creating client");
                 }
-                let client = OPCUAClient.create({
+                const client = OPCUAClient.create({
                     requestedSessionTimeout: 10000,
                     clientName: "Client-" + clientCount
                 });
@@ -148,7 +147,7 @@ module.exports = () => {
                             .on("keepalive", function () {
                                 debugLog("keepalive");
                             })
-                            .on("terminated", function () { });
+                            .on("terminated", function () {/** */});
                         const monitoredItem = ClientMonitoredItem.create(
                             subscription,
                             {
@@ -179,6 +178,7 @@ module.exports = () => {
 
         const shutdownClients = f(function disconnect_the_opcua_clients(callback: ErrorCallback) {
             function removeClient(callback: ErrorCallback) {
+                if (!clients) { return callback();}
                 const { client, session, subscription, monitoredItem } = clients.pop()!;
 
                 subscription.terminate((err?: Error) => {
@@ -204,11 +204,11 @@ module.exports = () => {
         });
 
         const wait_a_few_seconds = f(function wait_a_few_seconds(callback: ErrorCallback) {
-            setTimeout(callback, 1200);
+            setTimeout(callback, 1100);
         });
 
         const wait_a_minute = f(function wait_a_minute(callback: ErrorCallback) {
-            setTimeout(callback, 12000);
+            setTimeout(callback, 10* 1000);
         });
 
         before((done) => {
@@ -219,18 +219,17 @@ module.exports = () => {
             stopDiscoveryServer(done);
         });
 
-        it("T0a- should perform start/stop cycle efficiently ", function (done) {
+        it("DISCO4-A - should perform start/stop cycle efficiently ", function (done) {
             async.series([createServer, wait_a_few_seconds, shutdownServer], done);
         });
 
-        it("T0b- should perform start/stop cycle efficiently ", function (done) {
+        it("DISCO4-B - should perform start/stop cycle efficiently ", function (done) {
             async.series([createServer, shutdownServer], done);
         });
 
-        it("T0c0 - disposing  cerficiation manager during initialization ", function (done) {
-
+        it("DISCO4-C - disposing  cerficiation manager during initialization ", function (done) {
             const cm = new OPCUACertificateManager({
-                // rootFolder: 
+                // rootFolder:
             });
 
             async.series(
@@ -238,19 +237,21 @@ module.exports = () => {
                     f(function when_creating_a_opcua_certificate_manager(callback: ErrorCallback) {
                         cm.initialize((err) => {
                             done();
-                        })
+                        });
                         callback();
                     }),
                     f(function disposing(callback: ErrorCallback) {
                         cm.dispose();
-                    }),
+                    })
                 ],
                 () => {
+                    /* empty */
+                }
+            );
+        });
 
-                });
-        })
-        it("T0c- should cancel a client that is attempting a connection on an existing server", function (done) {
-            let client = OPCUAClient.create({});
+        it("DISCO4-D - should cancel a client that is attempting a connection on an existing server", function (done) {
+            const client = OPCUAClient.create({});
             const endpoint = discoveryServerEndpointUrl;
             async.series(
                 [
@@ -276,8 +277,8 @@ module.exports = () => {
             );
         });
 
-        it("T0d- should cancel a client that cannot connect - on standard LocalDiscoveryServer", function (done) {
-            let server = new OPCUAServer({
+        it("DISCO4-E - should cancel a client that cannot connect - on standard LocalDiscoveryServer", function (done) {
+            const server = new OPCUAServer({
                 port: port1,
                 registerServerMethod: RegisterServerMethod.LDS,
                 discoveryServerEndpointUrl: "opc.tcp://localhost:4840" //<< standard server
@@ -297,7 +298,7 @@ module.exports = () => {
             );
         });
 
-        it("T0f- should cancel a client that cannot connect - on specific LocalDiscoveryServer", function (done) {
+        it("DISCO4-F - should cancel a client that cannot connect - on specific LocalDiscoveryServer", function (done) {
             let server: OPCUAServer;
             async.series(
                 [
@@ -324,7 +325,7 @@ module.exports = () => {
             );
         });
 
-        it("T0g- registration manager as a standalone object 2/2", function (done) {
+        it("DISCO4-G - registration manager as a standalone object 2/2", function (done) {
             const registrationManager = new RegisterServerManager({
                 discoveryServerEndpointUrl: "opc.tcp://localhost:48481", // << not existing
                 server: {
@@ -349,7 +350,9 @@ module.exports = () => {
             async.series(
                 [
                     function (callback: ErrorCallback) {
-                        registrationManager.start(function () { });
+                        registrationManager.start(function () {
+                            /**/
+                        });
                         callback(); // setImmediate(callback);
                     },
                     function (callback: ErrorCallback) {
@@ -359,7 +362,7 @@ module.exports = () => {
                 done
             );
         });
-        it("T0h- registration manager as a standalone object 2/2", function (done) {
+        it("DISCO4-H - registration manager as a standalone object 2/2", function (done) {
             const registrationManager = new RegisterServerManager({
                 discoveryServerEndpointUrl,
                 server: {
@@ -384,7 +387,9 @@ module.exports = () => {
             async.series(
                 [
                     function (callback: ErrorCallback) {
-                        registrationManager.start(function () { });
+                        registrationManager.start(function () {
+                            /** */
+                        });
                         callback(); // setImmediate(callback);
                     },
                     function (callback: ErrorCallback) {
@@ -395,7 +400,7 @@ module.exports = () => {
             );
         });
 
-        it("T1- should perform start/stop cycle efficiently ", function (done) {
+        it("DISCO4-I - should perform start/stop cycle efficiently ", function (done) {
             async.series(
                 [
                     createServer,
@@ -422,7 +427,7 @@ module.exports = () => {
             );
         });
 
-        it("T2- should perform start/stop cycle efficiently even with many connected clients and server close before clients", function (done) {
+        it("DISCO4-J - should perform start/stop cycle efficiently even with many connected clients and server close before clients", function (done) {
             async.series(
                 [
                     createServer,
@@ -460,7 +465,7 @@ module.exports = () => {
             );
         });
 
-        it("T3- should perform start/stop cycle efficiently even with many connected clients and clients close before server", function (done) {
+        it("DISCO4-K - should perform start/stop cycle efficiently even with many connected clients and clients close before server", function (done) {
             async.series(
                 [
                     createServer,
@@ -487,7 +492,7 @@ module.exports = () => {
             );
         });
 
-        it("T4- should perform start/stop long cycle efficiently even with many connected clients and clients close before server", function (done) {
+        it("DISCO4-L - should perform start/stop long cycle efficiently even with many connected clients and clients close before server", function (done) {
             async.series(
                 [
                     createServer,
@@ -513,7 +518,7 @@ module.exports = () => {
             );
         });
 
-        it("T5- NR2 should not crash when a server that failed to start is shot down", function (done) {
+        it("DISCO4-M - NR2 should not crash when a server that failed to start is shot down", function (done) {
             let server1: OPCUAServer;
             let server2: OPCUAServer;
 
@@ -554,7 +559,7 @@ module.exports = () => {
             );
         });
 
-        it("T6- should not crash when we start two servers and stop the second server first", async () => {
+        it("DISCO4-N - should not crash when we start two servers and stop the second server first", async () => {
             const server1 = new OPCUAServer({ port: port1 });
             await server1.start();
 
@@ -565,7 +570,7 @@ module.exports = () => {
             await server1.shutdown();
         });
 
-        it("T7- should not crash when we start two servers and stop using the same order as we started them", async () => {
+        it("DISCO4-O - should not crash when we start two servers and stop using the same order as we started them", async () => {
             const server1 = new OPCUAServer({ port: port1 });
             await server1.start();
 

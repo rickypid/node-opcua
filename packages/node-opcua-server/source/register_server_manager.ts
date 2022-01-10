@@ -2,9 +2,9 @@
  * @module node-opcua-server
  */
 // tslint:disable:no-console
+import { EventEmitter } from "events";
 import * as async from "async";
 import * as chalk from "chalk";
-import { EventEmitter } from "events";
 
 import { assert } from "node-opcua-assert";
 import { ErrorCallback, UAString } from "node-opcua-basic-types";
@@ -26,9 +26,9 @@ import {
     RegisterServerResponse
 } from "node-opcua-service-discovery";
 import { ApplicationType, EndpointDescription, MdnsDiscoveryConfiguration, RegisteredServerOptions } from "node-opcua-types";
-import { IRegisterServerManager } from "./i_register_server_manager";
 import { exploreCertificate } from "node-opcua-crypto";
 import { OPCUACertificateManager } from "node-opcua-certificate-manager";
+import { IRegisterServerManager } from "./i_register_server_manager";
 
 const doDebug = checkDebugFlag(__filename);
 const debugLog = make_debugLog(__filename);
@@ -60,9 +60,12 @@ function securityPolicyLevel(securityPolicy: UAString): number {
             return 5;
         case SecurityPolicy.Basic256Rsa15:
             return 6;
-        case SecurityPolicy.Basic256Sha256:
-            return 7;
         case SecurityPolicy.Aes128_Sha256_RsaOaep:
+            return 7;
+        case SecurityPolicy.Basic256Sha256:
+            return 8;
+        case SecurityPolicy.Aes256_Sha256_RsaPss:
+            return 9;
         default:
             return 0;
     }
@@ -314,21 +317,27 @@ export class RegisterServerManager extends EventEmitter implements IRegisterServ
         this._registrationTimerId = null;
     }
 
-    public dispose() {
+    public dispose(): void {
         this.server = null;
         debugLog("RegisterServerManager#dispose", this.state.toString());
         assert(this.state === RegisterServerManagerStatus.INACTIVE);
+
+        if (this._registrationTimerId) {
+            clearTimeout(this._registrationTimerId);
+            this._registrationTimerId = null;
+        }
+        
         assert(this._registrationTimerId === null, "stop has not been called");
         this.removeAllListeners();
     }
 
-    public _emitEvent(eventName: string) {
+    public _emitEvent(eventName: string): void {
         setImmediate(() => {
             this.emit(eventName);
         });
     }
 
-    public _setState(status: RegisterServerManagerStatus) {
+    public _setState(status: RegisterServerManagerStatus): void {
         const previousState = this.state || RegisterServerManagerStatus.INACTIVE;
         debugLog(
             "RegisterServerManager#setState : ",
@@ -339,7 +348,7 @@ export class RegisterServerManager extends EventEmitter implements IRegisterServ
         this.state = status;
     }
 
-    public start(callback: ErrorCallback) {
+    public start(callback: ErrorCallback): void {
         debugLog("RegisterServerManager#start");
         if (this.state !== RegisterServerManagerStatus.INACTIVE) {
             return callback(new Error("RegisterServer process already started")); // already started
@@ -352,7 +361,7 @@ export class RegisterServerManager extends EventEmitter implements IRegisterServ
             if (err) {
                 debugLog("RegisterServerManager#start => _establish_initial_connection has failed");
                 return callback(err);
-            }   
+            }
             if (this.state !== RegisterServerManagerStatus.INITIALIZING) {
                 debugLog("RegisterServerManager#start => _establish_initial_connection has failed");
                 return callback();
@@ -367,7 +376,7 @@ export class RegisterServerManager extends EventEmitter implements IRegisterServ
                 if (err1) {
                     warningLog(
                         "RegisterServerManager#start - registering server has failed ! \n" +
-                        "please check that your server certificate is accepted by the LDS"
+                            "please check that your server certificate is accepted by the LDS"
                     );
                     this._setState(RegisterServerManagerStatus.INACTIVE);
                     this._emitEvent("serverRegistrationFailure");
@@ -478,14 +487,17 @@ export class RegisterServerManager extends EventEmitter implements IRegisterServ
                 },
                 // function wait_a_little_bit
                 (callback: ErrorCallback) => {
-                    setTimeout(callback, 100);
+                    setTimeout(callback, 10);
                 }
             ],
             (err?: Error | null) => {
                 debugLog("-------------------------------", !!err);
 
                 if (this.state !== RegisterServerManagerStatus.INITIALIZING) {
-                    debugLog("RegisterServerManager#_establish_initial_connection has been interrupted ", RegisterServerManagerStatus[this.state]);
+                    debugLog(
+                        "RegisterServerManager#_establish_initial_connection has been interrupted ",
+                        RegisterServerManagerStatus[this.state]
+                    );
                     this._setState(RegisterServerManagerStatus.INACTIVE);
                     if (this._registration_client) {
                         this._registration_client.disconnect((err2?: Error) => {
@@ -513,7 +525,7 @@ export class RegisterServerManager extends EventEmitter implements IRegisterServ
         );
     }
 
-    public _trigger_next() {
+    public _trigger_next(): void {
         assert(!this._registrationTimerId);
         assert(this.state === RegisterServerManagerStatus.WAITING);
         // from spec 1.04 part 4:
@@ -562,7 +574,7 @@ export class RegisterServerManager extends EventEmitter implements IRegisterServ
         }, this.timeout);
     }
 
-    public stop(callback: ErrorCallback) {
+    public stop(callback: ErrorCallback): void {
         debugLog("RegisterServerManager#stop");
 
         if (this._registrationTimerId) {
@@ -592,7 +604,7 @@ export class RegisterServerManager extends EventEmitter implements IRegisterServ
      * @param outer_callback
      * @private
      */
-    public _registerServer(isOnline: boolean, outer_callback: ErrorCallback) {
+    public _registerServer(isOnline: boolean, outer_callback: ErrorCallback): void {
         assert(typeof outer_callback === "function");
 
         debugLog(
@@ -625,12 +637,19 @@ export class RegisterServerManager extends EventEmitter implements IRegisterServ
             warningLog(`Warning the server is already in the ${RegisterServerManagerStatus[theStatus]} state`);
             return outer_callback();
         }
-        assert(this.state === RegisterServerManagerStatus.INITIALIZING || this.state === RegisterServerManagerStatus.WAITING);
-        
+        if (!(this.state === RegisterServerManagerStatus.INITIALIZING || this.state === RegisterServerManagerStatus.WAITING)) {
+            warningLog("Warning : cannot register server - wrong state " , RegisterServerManagerStatus[this.state]);
+            return outer_callback();
+        };
+
         this._setState(theStatus);
 
         if (this._registration_client) {
-            warningLog(`Warning there is already a registering/unregistering task taking place:  ${RegisterServerManagerStatus[this.state]} state`);
+            warningLog(
+                `Warning there is already a registering/unregistering task taking place:  ${
+                    RegisterServerManagerStatus[this.state]
+                } state`
+            );
         }
 
         const options: OPCUAClientBaseOptions = {
@@ -651,7 +670,7 @@ export class RegisterServerManager extends EventEmitter implements IRegisterServ
 
             connectionStrategy: no_reconnect_connectivity_strategy,
 
-            clientName: "server client to LDS " + RegisterServerManagerStatus[theStatus],
+            clientName: "server client to LDS " + RegisterServerManagerStatus[theStatus]
         };
 
         const client = OPCUAClientBase.create(options) as ClientBaseEx;
@@ -668,20 +687,20 @@ export class RegisterServerManager extends EventEmitter implements IRegisterServ
             [
                 // establish_connection_with_lds
                 (callback: ErrorCallback) => {
-                    client.connect(selectedEndpoint?.endpointUrl!, (err?: Error) => {
+                    client.connect(selectedEndpoint!.endpointUrl!, (err?: Error) => {
                         debugLog("establish_connection_with_lds => err = ", err);
                         if (err) {
                             debugLog("RegisterServerManager#_registerServer connection to client has failed");
                             debugLog(
                                 "RegisterServerManager#_registerServer  " +
-                                "=> please check that you server certificate is trusted by the LDS"
+                                    "=> please check that you server certificate is trusted by the LDS"
                             );
                             warningLog(
                                 "RegisterServer to the LDS  has failed during secure connection  " +
-                                "=> please check that you server certificate is trusted by the LDS.",
+                                    "=> please check that you server certificate is trusted by the LDS.",
                                 "\nerr: " + err.message,
                                 "\nLDS endpoint    :",
-                                selectedEndpoint?.endpointUrl!,
+                                selectedEndpoint!.endpointUrl!,
                                 "\nsecurity mode   :",
                                 MessageSecurityMode[selectedEndpoint.securityMode],
                                 "\nsecurity policy :",
@@ -699,14 +718,20 @@ export class RegisterServerManager extends EventEmitter implements IRegisterServ
                     });
                 },
                 (callback: ErrorCallback) => {
-                    if (!this._registration_client) { callback(); return; }
+                    if (!this._registration_client) {
+                        callback();
+                        return;
+                    }
                     sendRegisterServerRequest(this.server!, client as ClientBaseEx, isOnline, (err?: Error | null) => {
                         callback(/* intentionally no error propagation*/);
                     });
                 },
                 // close_connection_with_lds
                 (callback: ErrorCallback) => {
-                    if (!this._registration_client) { callback(); return; }
+                    if (!this._registration_client) {
+                        callback();
+                        return;
+                    }
                     client.disconnect(callback);
                 }
             ],
@@ -721,7 +746,6 @@ export class RegisterServerManager extends EventEmitter implements IRegisterServ
                     this._registration_client = null;
                     outer_callback(err!);
                 });
-
             }
         );
     }

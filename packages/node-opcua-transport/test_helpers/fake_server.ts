@@ -1,18 +1,16 @@
 import { EventEmitter } from "events";
-import * as  net from "net";
+import * as net from "net";
 import { assert } from "node-opcua-assert";
 
-const port = 5678;
- 
-export class FakeServer extends EventEmitter {
 
+export class FakeServer extends EventEmitter {
     public port: number;
     public url: string;
     public tcpServer: net.Server;
     protected _serverSocket?: net.Socket;
     private _responses?: any[];
 
-    constructor() {
+    constructor({ port }: { port: number }) {
         super();
         this.port = port;
 
@@ -28,7 +26,7 @@ export class FakeServer extends EventEmitter {
 
             this._serverSocket.on("data", (data: Buffer) => {
                 const func = this.popResponse();
-                if (func) {
+                if (func && this._serverSocket) {
                     func(this._serverSocket, data);
                 }
             });
@@ -45,27 +43,25 @@ export class FakeServer extends EventEmitter {
         });
     }
 
-    public initialize(done: () => void) {
-
+    public initialize(done: () => void): void {
         this.tcpServer.listen(this.port, () => {
             done();
         });
     }
 
-    public shutdown(callback: (err?: Error) => void) {
+    public shutdown(callback: (err?: Error) => void): void {
         this.tcpServer.close(callback);
     }
 
-    public popResponse() {
+    public popResponse(): ((socket: net.Socket, data: Buffer) => void) | null {
         if (!this._responses) {
             return null;
         }
         return this._responses.shift();
     }
 
-    public pushResponse(func: any) {
+    public pushResponse(func: (socket: net.Socket, data: Buffer) => void): void {
         this._responses = this._responses || [];
         this._responses.push(func);
     }
-
 }

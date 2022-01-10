@@ -1,8 +1,9 @@
 // tslint:disable:no-console
-import * as chalk from "chalk";
 import * as path from "path";
-import "should";
 import * as os from "os";
+
+import "should";
+import * as chalk from "chalk";
 
 import {
     EndpointDescription,
@@ -28,16 +29,15 @@ const port2 = 3018;
 
 Error.stackTraceLimit = Infinity;
 
-const envPaths = require("env-paths");
-const config = envPaths("MiniNodeOPCUA-Server").config;
-const pkiFolder = path.join(config, "pki");
+import { createServerCertificateManager } from "../test_helpers/createServerCertificateManager";
 
 let server: OPCUAServer;
 
 async function startServer() {
-    const serverOptions: OPCUAServerOptions = {
-        serverCertificateManager: new OPCUACertificateManager({ rootFolder: pkiFolder }),
+    const serverCertificateManager = await createServerCertificateManager(port1);
 
+    const serverOptions: OPCUAServerOptions = {
+        serverCertificateManager,
         port: port1,
 
         nodeset_filename: [nodesets.standard],
@@ -58,7 +58,9 @@ async function startServer() {
     try {
         await server.start();
     } catch (err) {
-        errorLog(" Server failed to start ... exiting => err:", err.message);
+        if (err instanceof Error) {
+            errorLog(" Server failed to start ... exiting => err:", err.message);
+        }
         return;
     }
     for (const endpoint of server.endpoints) {
@@ -91,15 +93,21 @@ async function extractEndpoints(endpointUrl: string): Promise<EndpointDescriptio
         await client.disconnect();
         return endpoints;
     } catch (err) {
-        errorLog("Client error ", err.message);
+        if (err instanceof Error) {
+            errorLog("Client error ", err.message);
+        }
         errorLog(err);
         return [];
     }
 }
 
 async function startMultiHeadServer() {
+
+    const serverCertificateManager = await createServerCertificateManager(port1);
+    //  new OPCUACertificateManager({ rootFolder: pkiFolder }),
+
     const serverOptions: OPCUAServerOptions = {
-        serverCertificateManager: new OPCUACertificateManager({ rootFolder: pkiFolder }),
+        serverCertificateManager,
         isAuditing: false,
         nodeset_filename: [nodesets.standard],
         serverInfo: {
@@ -133,7 +141,9 @@ async function startMultiHeadServer() {
     try {
         await server.start();
     } catch (err) {
-        errorLog(" Server failed to start ... exiting => err:", err.message);
+        if (err instanceof Error) {
+            errorLog(" Server failed to start ... exiting => err:", err.message);
+        }
         return;
     }
 }
@@ -159,7 +169,7 @@ describe("Testing server with alternate names", () => {
         const endpointUrl = `opc.tcp://localhost:${port1}`;
         const endpoints = await extractEndpoints(endpointUrl);
         dumpEndpoints(endpoints);
-        endpoints.length.should.eql(3 * 7);
+        endpoints.length.should.eql(3 * 9);
     });
 });
 

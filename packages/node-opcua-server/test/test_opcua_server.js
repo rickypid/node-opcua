@@ -1,23 +1,25 @@
 "use strict";
-const should = require("should");
 const fs = require("fs");
+const should = require("should");
 
-const NodeId = require("node-opcua-nodeid").NodeId;
-
-const OPCUAServer = require("..").OPCUAServer;
+const { NodeId } = require("node-opcua-nodeid");
 
 const { get_mini_nodeset_filename } = require("node-opcua-address-space/testHelpers");
+
+const { OPCUAServer } = require("..");
+
 const mini_nodeset_filename = get_mini_nodeset_filename();
 
-fs.existsSync(mini_nodeset_filename).should.eql(true,
-    " expecting " + mini_nodeset_filename + " to exist");
+fs.existsSync(mini_nodeset_filename).should.eql(true, " expecting " + mini_nodeset_filename + " to exist");
 
+const port = 2022;
+// eslint-disable-next-line import/order
 const describe = require("node-opcua-leak-detector").describeWithLeakDetector;
 describe("OPCUAServer", () => {
     let server;
     beforeEach((done) => {
         const options = {
-            port: 2000,
+            port,
             nodeset_filename: [mini_nodeset_filename]
         };
 
@@ -32,7 +34,6 @@ describe("OPCUAServer", () => {
                 server = null;
                 done();
             });
-
         } else {
             server = null;
             done();
@@ -40,7 +41,6 @@ describe("OPCUAServer", () => {
     });
 
     it("should dismiss all existing sessions upon termination", (done) => {
-
         server.engine.currentSessionCount.should.equal(0);
 
         // let make sure that no session exists
@@ -50,19 +50,16 @@ describe("OPCUAServer", () => {
         server.engine.currentSessionCount.should.equal(1);
         server.engine.cumulatedSessionCount.should.equal(1);
 
-
-        server.shutdown(function() {
+        server.shutdown(function () {
             server.engine.currentSessionCount.should.equal(0);
             server.engine.cumulatedSessionCount.should.equal(1);
             server = null;
             session = null;
             done();
         });
-
     });
 
     it("server address space have a node matching session.nodeId", (done) => {
-
         server.engine.currentSessionCount.should.equal(0);
 
         // let make sure that no session exists
@@ -85,20 +82,17 @@ describe("OPCUAServer", () => {
 
         sessionNode.browseName.toString().should.eql("1:SessionNameGivenByClient");
         done();
-
     });
 });
 
 describe("OPCUAServer-2", () => {
-
     let server;
 
     before((done) => {
-
         fs.existsSync(mini_nodeset_filename).should.eql(true);
 
         const options = {
-            port: 2000,
+            port,
             nodeset_filename: [mini_nodeset_filename]
         };
         server = new OPCUAServer(options);
@@ -131,13 +125,10 @@ describe("OPCUAServer-2", () => {
     it("#buildInfo", () => {
         server.buildInfo.should.eql(server.engine.buildInfo);
     });
-
 });
 describe("OPCUAServer-3", () => {
-
     let server;
     before((done) => {
-
         server = new OPCUAServer();
         done();
     });
@@ -152,7 +143,5 @@ describe("OPCUAServer-3", () => {
         server.currentSessionCount.should.eql(0);
         server.isAuditing.should.eql(false);
         should(server.getSession(NodeId.nullNodeId, true)).eql(null);
-
     });
 });
-

@@ -1,12 +1,14 @@
 /**
  * @module node-opcua-server-discovery
  */
-import * as chalk from "chalk";
+
 import * as os from "os";
 import * as path from "path";
 import * as url from "url";
 import { callbackify } from "util";
-import * as envPaths from "env-paths";
+
+import * as chalk from "chalk";
+import envPaths = require("env-paths");
 
 import { assert } from "node-opcua-assert";
 import { UAString } from "node-opcua-basic-types";
@@ -30,12 +32,12 @@ import {
     sameAnnouncement,
     ServerOnNetwork
 } from "node-opcua-service-discovery";
+import { OPCUACertificateManager } from "node-opcua-certificate-manager";
 import { ApplicationDescription } from "node-opcua-service-endpoints";
 import { ApplicationDescriptionOptions, ApplicationType } from "node-opcua-service-endpoints";
 import { ErrorCallback, StatusCode, StatusCodes } from "node-opcua-status-code";
 
 import { MDNSResponder } from "./mdns_responder";
-import { OPCUACertificateManager } from "node-opcua-certificate-manager";
 
 const debugLog = make_debugLog(__filename);
 const doDebug = checkDebugFlag(__filename);
@@ -178,10 +180,6 @@ export class OPCUADiscoveryServer extends OPCUABaseServer {
     public async shutdown(): Promise<void>;
     public shutdown(done: ErrorCallback): void;
     public shutdown(done?: ErrorCallback): any {
-        if (this.mDnsResponder) {
-            this.mDnsResponder.dispose();
-            this.mDnsResponder = undefined;
-        }
         debugLog("stopping announcement of LDS on mDNS");
         this.bonjourHolder._stop_announcedOnMulticastSubnetWithCallback((err?: Error | null) => {
             if (err) {
@@ -190,7 +188,11 @@ export class OPCUADiscoveryServer extends OPCUABaseServer {
             debugLog("stopping announcement of LDS on mDNS - DONE");
             debugLog("Shutting down Discovery Server");
             super.shutdown(() => {
-                setTimeout(() => done!(), 100);
+                if (this.mDnsResponder) {
+                    this.mDnsResponder.dispose();
+                    this.mDnsResponder = undefined;
+                }
+                setTimeout(() => done!(), 10);
             });
         });
     }
@@ -357,7 +359,7 @@ export class OPCUADiscoveryServer extends OPCUABaseServer {
         rawServer: RegisteredServer,
         discoveryConfigurations?: MdnsDiscoveryConfiguration[]
     ): Promise<Response> {
-        const server = (rawServer as any) as RegisteredServerExtended;
+        const server = rawServer as any as RegisteredServerExtended;
 
         if (!discoveryConfigurations) {
             discoveryConfigurations = [

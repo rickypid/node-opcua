@@ -2,39 +2,33 @@
 
 const async = require("async");
 require("should");
-
-const { build_client_server_session } = require("../../test_helpers/build_client_server_session");
 const { UAProxyManager } = require("node-opcua-client-proxy");
-
 const { getAddressSpaceFixture } = require("node-opcua-address-space/testHelpers");
 
+const { build_client_server_session } = require("../../test_helpers/build_client_server_session");
 
+
+
+// eslint-disable-next-line import/order
 const describe = require("node-opcua-leak-detector").describeWithLeakDetector;
 describe("testing client Proxy State Machine", function() {
 
     this.timeout(Math.max(200000, this.timeout()));
 
     const port = 2245;
-    const server_options = {
+    const serverOptions = {
         port,
         nodeset_filename: [
             getAddressSpaceFixture("fixture_simple_statemachine_nodeset2.xml"),
         ]
     };
 
-    let g_session;
+    let session;
     let client_server;
 
-    before(function(done) {
-
-        client_server = build_client_server_session(server_options, function(err) {
-            if (!err) {
-                g_session = client_server.g_session;
-
-            }
-            done(err);
-        });
-
+    before(async () => {
+        client_server = await build_client_server_session(serverOptions);
+        session = client_server.g_session;
     });
 
     function dumpStats() {
@@ -44,9 +38,9 @@ describe("testing client Proxy State Machine", function() {
         console.log("transactionsPerformed  ", client.transactionsPerformed, " ");
 
     }
-    after(function(done) {
+    after( async () => {
         dumpStats();
-        client_server.shutdown(done);
+        await client_server.shutdown();
     });
 
 
@@ -68,7 +62,7 @@ describe("testing client Proxy State Machine", function() {
 
         dumpStats();
 
-        const proxyManager = new UAProxyManager(g_session);
+        const proxyManager = new UAProxyManager(session);
 
         async.series([
             function(callback) {
@@ -101,10 +95,11 @@ describe("testing client Proxy State Machine", function() {
             }
         ], done);
     });
+
     it("Z1b should read a state machine", function(done) {
 
 
-        const proxyManager = new UAProxyManager(g_session);
+        const proxyManager = new UAProxyManager(session);
 
         async.series([
             function(callback) {

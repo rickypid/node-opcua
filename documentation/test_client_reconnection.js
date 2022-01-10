@@ -1,12 +1,14 @@
+"use strict";
 
 /// issues: #237 #288
+const path = require("path");
+
+const fs = require("fs");
+
 const opcua = require("node-opcua");
 const chalk = require("chalk");
 const async = require("async");
 const  _ = require("underscore");
-const path = require("paths");
-const fs = require("fs");
-
  
 function server_stuff() {
     let server;
@@ -84,7 +86,7 @@ const certificateFile = path.join(certificateFolder, "client_selfsigned_cert_204
 const privateKeyFile =  path.join(certificateFolder, "client_key_2048.pem");
 
 const client = opcua.OPCUAClient.create({
-    endpoint_must_exist: false,
+    endpointMustExist: false,
     keepSessionAlive: true,
     requestedSessionTimeout: 60000,
 

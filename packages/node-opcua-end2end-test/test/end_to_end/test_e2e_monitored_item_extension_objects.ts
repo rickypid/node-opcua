@@ -38,7 +38,6 @@ describe("AZA1- testing Client-Server subscription use case, on a fake server ex
 
     const server = new OPCUAServer({
         port,
-
         nodeset_filename: [nodesets.standard, nodesets.di, nodesets.autoId]
     });
 

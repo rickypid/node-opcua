@@ -1,10 +1,11 @@
 "use strict";
 const os = require("os");
+const fs = require("fs");
+const path = require("path");
+
 const opcua = require("node-opcua");
 const async = require("async");
-const fs = require("fs");
 const should = require("should");
-const path = require("path");
 
 const { start_simple_server, stop_simple_server } = require("../../test_helpers/external_server_fixture");
 const { perform_operation_on_client_session } = require("../../test_helpers/perform_operation_on_client_session");
@@ -15,6 +16,7 @@ const OPCUAClient = opcua.OPCUAClient;
 
 const port = 2018;
 
+// eslint-disable-next-line import/order
 const describe = require("node-opcua-leak-detector").describeWithLeakDetector;
 describe("testing extension object with client residing on a different process than the server process", function () {
     this.timeout(Math.max(600000, this.timeout()));
@@ -28,18 +30,11 @@ describe("testing extension object with client residing on a different process t
     };
     fs.existsSync(options.server_sourcefile).should.eql(true, "cannot find simple_server_with_custom_extension_objects script");
 
-    before(function (done) {
-        start_simple_server(options, function (err, data) {
-            if (!err) {
-                serverHandle = data;
-            }
-            done(err);
-        });
+    before(async () => {
+        serverHandle = await start_simple_server(options);
     });
-    after(function (done) {
-        stop_simple_server(serverHandle, function (err) {
-            done(err);
-        });
+    after(async () => {
+        await stop_simple_server(serverHandle);
     });
 
     it("should read the MyStructureDataType definition", function (done) {
